@@ -14,8 +14,8 @@ public class AisleBeBackStoreGenerator : EditorWindow
 
     [Header("Store Layout")]
     [SerializeField] private int aisleRows = 5;
-    [SerializeField] private int shelfUnitsPerRow = 6;
-    [SerializeField] private float shelfSpacing = 3.2f;
+    [SerializeField] private int shelfUnitsPerRow = 14;
+    [SerializeField] private float shelfSpacing = 1.8f;
     [SerializeField] private float aisleSpacing = 5.0f;
     [SerializeField] private float storeWidth = 42f;
     [SerializeField] private float storeLength = 52f;
@@ -30,14 +30,21 @@ public class AisleBeBackStoreGenerator : EditorWindow
     [SerializeField] private GameObject producePrefab;
     [SerializeField] private GameObject signPrefab;
 
-    [Header("Details")]
-    [SerializeField] private int productsPerShelfUnit = 3;
+    [Header("Shelf Stocking")]
+    [SerializeField] private int productsPerShelfLevel = 4;
+    [SerializeField] private int shelfLevels = 4;
+    [SerializeField] private bool stockBothSides = true;
     [SerializeField] private bool addProducts = true;
+
+    [Header("Details")]
     [SerializeField] private bool addCheckoutArea = true;
     [SerializeField] private bool addCeiling = false;
     [SerializeField] private int randomSeed = 25;
 
     private List<GameObject> productOptions = new List<GameObject>();
+    private List<List<GameObject>> productCategories = new List<List<GameObject>>();
+    private const string ProductPrefabRoot = "Assets/ModernSupermarket/Prefabs/Props/Products";
+    private const string ProducePrefabRoot = "Assets/ModernSupermarket/Prefabs/Props/Produce";
 
     [MenuItem("Tools/Aisle Be Back/Store Generator")]
     public static void Open()
@@ -80,8 +87,10 @@ public class AisleBeBackStoreGenerator : EditorWindow
 
         EditorGUILayout.Space(8);
         EditorGUILayout.LabelField("Generation Options", EditorStyles.boldLabel);
-        addProducts = EditorGUILayout.Toggle("Place Products", addProducts);
-        productsPerShelfUnit = Mathf.Clamp(EditorGUILayout.IntField("Products Per Shelf Unit", productsPerShelfUnit), 0, 8);
+        addProducts = EditorGUILayout.Toggle("Stock Shelves", addProducts);
+        productsPerShelfLevel = Mathf.Clamp(EditorGUILayout.IntField("Products Across Each Shelf Level", productsPerShelfLevel), 1, 10);
+        shelfLevels = Mathf.Clamp(EditorGUILayout.IntField("Stocked Levels Per Shelf", shelfLevels), 1, 6);
+        stockBothSides = EditorGUILayout.Toggle("Stock Both Sides", stockBothSides);
         addCheckoutArea = EditorGUILayout.Toggle("Add Checkout Area", addCheckoutArea);
         addCeiling = EditorGUILayout.Toggle("Add Ceiling", addCeiling);
         randomSeed = EditorGUILayout.IntField("Random Seed", randomSeed);
@@ -123,12 +132,30 @@ public class AisleBeBackStoreGenerator : EditorWindow
         if (signPrefab == null)
             signPrefab = FindByName(prefabs, "sign");
 
-        productOptions = prefabs.Where(p =>
+        // Product prefabs live in dedicated folders. Search those folders directly so the
+        // generator uses the actual packaged groceries instead of one generic prefab.
+        string[] productGuids = AssetDatabase.FindAssets("t:Prefab", new[] { ProductPrefabRoot, ProducePrefabRoot });
+        productOptions = productGuids
+            .Select(g => AssetDatabase.LoadAssetAtPath<GameObject>(AssetDatabase.GUIDToAssetPath(g)))
+            .Where(p => p != null && !IsDisplayOrFixture(p.name))
+            .Distinct()
+            .OrderBy(p => p.name)
+            .ToList();
+
+        productCategories = productOptions
+            .GroupBy(p => GetProductCategory(p.name))
+            .OrderBy(g => g.Key)
+            .Select(g => g.ToList())
+            .ToList();
+
+        if (productPrefab == null && productOptions.Count > 0)
+            productPrefab = productOptions[0];
+        if (producePrefab == null)
         {
-            string n = p.name.ToLowerInvariant();
-            return n.Contains("product") || n.Contains("fruit") || n.Contains("vegetable") ||
-                   n.Contains("can") || n.Contains("bottle") || n.Contains("box") || n.Contains("produce");
-        }).ToList();
+            string[] produceGuids = AssetDatabase.FindAssets("t:Prefab", new[] { ProducePrefabRoot });
+            if (produceGuids.Length > 0)
+                producePrefab = AssetDatabase.LoadAssetAtPath<GameObject>(AssetDatabase.GUIDToAssetPath(produceGuids[0]));
+        }
 
         Repaint();
     }
@@ -264,28 +291,116 @@ public class AisleBeBackStoreGenerator : EditorWindow
 
     private void PlaceProductsOnShelf(Transform shelf, Transform parent, int row, int unit)
     {
-        GameObject chosen = null;
-        if (productOptions.Count > 0)
-            chosen = productOptions[Random.Range(0, productOptions.Count)];
-        if (chosen == null) chosen = producePrefab != null ? producePrefab : productPrefab;
-        if (chosen == null) return;
+        if (productOptions.Count == 0 && productPrefab == null && producePrefab == null)
+            return;
 
-        Bounds bounds = GetCombinedBounds(shelf.gameObject);
-        float width = Mathf.Max(0.8f, bounds.size.x);
-        float depth = Mathf.Max(0.4f, bounds.size.z);
-        float height = Mathf.Max(1f, bounds.size.y);
-        int count = Mathf.Max(0, productsPerShelfUnit);
-        for (int i = 0; i < count; i++)
+        Bounds shelfBounds = GetLocalBounds(shelf.gameObject);
+        float width = Mathf.Max(0.6f, shelfBounds.size.x);
+        float depth = Mathf.Max(0.25f, shelfBounds.size.z);
+        float height = Mathf.Max(1.2f, shelfBounds.size.y);
+        int across = Mathf.Max(1, productsPerShelfLevel);
+        int faces = stockBothSides ? 2 : 1;
+        float cellWidth = (width - 0.12f) / across;
+        float levelSpacing = height / (shelfLevels + 1f);
+
+        // Keep each aisle visually coherent: each row gets a product category, while
+        // variants within that category provide natural packaging variety.
+        List<GameObject> category = productCategories.Count > 0
+            ? productCategories[row % productCategories.Count]
+            : productOptions;
+
+        for (int level = 0; level < shelfLevels; level++)
         {
-            float px = Random.Range(-width * 0.28f, width * 0.28f);
-            float pz = Random.Range(-depth * 0.25f, depth * 0.25f);
-            float py = height * Random.Range(0.25f, 0.85f);
-            var item = InstantiatePrefab(chosen, shelf.transform.TransformPoint(new Vector3(px, py, pz)),
-                Quaternion.Euler(0f, Random.Range(0f, 360f), 0f), parent,
-                "Product R" + (row + 1) + " S" + (unit + 1) + " " + (i + 1));
-            if (item != null)
-                item.transform.localScale *= Random.Range(0.85f, 1.15f);
+            float shelfSurfaceY = shelfBounds.min.y + ((level + 1f) * height / (shelfLevels + 1f));
+            for (int face = 0; face < faces; face++)
+            {
+                int faceSign = (stockBothSides && face == 1) ? -1 : 1;
+                for (int slot = 0; slot < across; slot++)
+                {
+                    GameObject chosen = category.Count > 0
+                        ? category[Random.Range(0, category.Count)]
+                        : (producePrefab != null ? producePrefab : productPrefab);
+                    if (chosen == null) continue;
+
+                    Bounds itemBounds = GetLocalBounds(chosen);
+                    Vector3 itemSize = itemBounds.size;
+                    if (itemSize.x < 0.001f) itemSize.x = 0.25f;
+                    if (itemSize.y < 0.001f) itemSize.y = 0.3f;
+                    if (itemSize.z < 0.001f) itemSize.z = 0.2f;
+
+                    // Scale oversized products down to fit their shelf slot, but keep
+                    // small packages at their authored size so the shelves look full.
+                    float faceDepth = Mathf.Max(0.18f, depth * 0.43f);
+                    float scale = Mathf.Min(1f,
+                        (cellWidth * 0.88f) / itemSize.x,
+                        (faceDepth * 0.82f) / itemSize.z,
+                        (levelSpacing * 0.78f) / itemSize.y);
+                    scale = Mathf.Clamp(scale, 0.35f, 1f);
+
+                    float localX = shelfBounds.min.x + 0.06f + cellWidth * (slot + 0.5f);
+                    float localZ = faceSign * Mathf.Max(0.03f, shelfBounds.extents.z - itemSize.z * scale * 0.5f - 0.025f);
+                    Vector3 shelfPoint = new Vector3(localX, shelfSurfaceY, localZ);
+                    Quaternion rotation = shelf.rotation * Quaternion.Euler(0f, faceSign < 0 ? 180f : 0f, 0f);
+                    Vector3 boundsOffset = new Vector3(itemBounds.center.x * scale, itemBounds.min.y * scale, itemBounds.center.z * scale);
+                    Vector3 worldPosition = shelf.TransformPoint(shelfPoint) - rotation * boundsOffset;
+
+                    // Avoid thousands of separate Undo records; the generated root is
+                    // registered with Undo and owns all these generated instances.
+                    GameObject item = (GameObject)PrefabUtility.InstantiatePrefab(chosen);
+                    if (item == null) item = Instantiate(chosen);
+                    item.name = "Stock R" + (row + 1) + " S" + (unit + 1) + " L" + (level + 1) + " F" + face + " P" + (slot + 1);
+                    item.transform.SetParent(parent, true);
+                    item.transform.SetPositionAndRotation(worldPosition, rotation);
+                    item.transform.localScale = chosen.transform.localScale * scale;
+                }
+            }
         }
+    }
+
+    private static bool IsDisplayOrFixture(string prefabName)
+    {
+        string n = prefabName.ToLowerInvariant();
+        return n.Contains("shelf") || n.Contains("rack") || n.Contains("display") ||
+               n.Contains("checkout") || n.Contains("cashier") || n.Contains("register") ||
+               n.Contains("basket") || n.Contains("shoppingcart") || n.Contains("shopping_cart");
+    }
+
+    private static string GetProductCategory(string prefabName)
+    {
+        int separator = prefabName.IndexOf('_');
+        return separator > 0 ? prefabName.Substring(0, separator) : prefabName;
+    }
+
+    private static Bounds GetLocalBounds(GameObject target)
+    {
+        Renderer[] renderers = target.GetComponentsInChildren<Renderer>();
+        if (renderers.Length == 0)
+            return new Bounds(Vector3.zero, new Vector3(0.25f, 0.3f, 0.2f));
+
+        bool initialized = false;
+        Bounds localBounds = new Bounds(Vector3.zero, Vector3.zero);
+        foreach (Renderer renderer in renderers)
+        {
+            Bounds worldBounds = renderer.bounds;
+            Vector3 min = worldBounds.min;
+            Vector3 max = worldBounds.max;
+            for (int corner = 0; corner < 8; corner++)
+            {
+                Vector3 worldCorner = new Vector3(
+                    (corner & 1) == 0 ? min.x : max.x,
+                    (corner & 2) == 0 ? min.y : max.y,
+                    (corner & 4) == 0 ? min.z : max.z);
+                Vector3 localCorner = target.transform.InverseTransformPoint(worldCorner);
+                if (!initialized)
+                {
+                    localBounds = new Bounds(localCorner, Vector3.zero);
+                    initialized = true;
+                }
+                else
+                    localBounds.Encapsulate(localCorner);
+            }
+        }
+        return initialized ? localBounds : new Bounds(Vector3.zero, new Vector3(0.25f, 0.3f, 0.2f));
     }
 
     private static Transform CreateGroup(Transform parent, string name)

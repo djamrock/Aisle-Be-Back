@@ -31,7 +31,7 @@ public class AisleBeBackStoreGenerator : EditorWindow
     [SerializeField] private GameObject signPrefab;
 
     [Header("Shelf Stocking")]
-    [SerializeField] private int productsPerShelfLevel = 4;
+    [SerializeField] private int productsPerShelfLevel = 3;
     [SerializeField] private int shelfLevels = 4;
     [SerializeField] private bool stockBothSides = true;
     [SerializeField] private bool addProducts = true;
@@ -377,19 +377,23 @@ public class AisleBeBackStoreGenerator : EditorWindow
         if (renderers.Length == 0)
             return new Bounds(Vector3.zero, new Vector3(0.25f, 0.3f, 0.2f));
 
+        // Use each renderer's local bounds transformed into the target's local space.
+        // Renderer.bounds is a world-space AABB and can be misleading for prefab assets
+        // that have not been instantiated into the active scene.
         bool initialized = false;
         Bounds localBounds = new Bounds(Vector3.zero, Vector3.zero);
         foreach (Renderer renderer in renderers)
         {
-            Bounds worldBounds = renderer.bounds;
-            Vector3 min = worldBounds.min;
-            Vector3 max = worldBounds.max;
+            Bounds rendererBounds = renderer.localBounds;
+            Vector3 min = rendererBounds.min;
+            Vector3 max = rendererBounds.max;
             for (int corner = 0; corner < 8; corner++)
             {
-                Vector3 worldCorner = new Vector3(
+                Vector3 rendererLocalCorner = new Vector3(
                     (corner & 1) == 0 ? min.x : max.x,
                     (corner & 2) == 0 ? min.y : max.y,
                     (corner & 4) == 0 ? min.z : max.z);
+                Vector3 worldCorner = renderer.transform.TransformPoint(rendererLocalCorner);
                 Vector3 localCorner = target.transform.InverseTransformPoint(worldCorner);
                 if (!initialized)
                 {

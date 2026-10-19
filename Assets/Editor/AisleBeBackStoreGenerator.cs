@@ -13,10 +13,10 @@ public class AisleBeBackStoreGenerator : EditorWindow
     private const string GeneratedRootName = "GENERATED - Aisle Be Back Store";
 
     [Header("Store Layout")]
-    [SerializeField] private int aisleRows = 5;
-    [SerializeField] private int shelfUnitsPerRow = 14;
-    [SerializeField] private float shelfSpacing = 1.8f;
-    [SerializeField] private float aisleSpacing = 5.0f;
+    [SerializeField] private int aisleRows = 4;
+    [SerializeField] private int shelfUnitsPerRow = 7;
+    [SerializeField] private float shelfSpacing = 3.0f;
+    [SerializeField] private float aisleSpacing = 6.5f;
     [SerializeField] private float storeWidth = 42f;
     [SerializeField] private float storeLength = 52f;
     [SerializeField] private float wallHeight = 6f;
@@ -31,7 +31,7 @@ public class AisleBeBackStoreGenerator : EditorWindow
     [SerializeField] private GameObject signPrefab;
 
     [Header("Shelf Stocking")]
-    [SerializeField] private int productsPerShelfLevel = 4;
+    [SerializeField] private int productsPerShelfLevel = 3;
     [SerializeField] private int shelfLevels = 4;
     [SerializeField] private bool stockBothSides = true;
     [SerializeField] private bool addProducts = true;
@@ -41,6 +41,10 @@ public class AisleBeBackStoreGenerator : EditorWindow
     [SerializeField] private bool addCeiling = false;
     [SerializeField] private int randomSeed = 25;
 
+    private List<GameObject> shelfOptions = new List<GameObject>();
+    private List<GameObject> refrigerationOptions = new List<GameObject>();
+    private List<GameObject> displayOptions = new List<GameObject>();
+    private List<GameObject> aisleSignOptions = new List<GameObject>();
     private List<GameObject> productOptions = new List<GameObject>();
     private List<List<GameObject>> productCategories = new List<List<GameObject>>();
     private const string ProductPrefabRoot = "Assets/ModernSupermarket/Prefabs/Props/Products";
@@ -105,8 +109,8 @@ public class AisleBeBackStoreGenerator : EditorWindow
         }
 
         EditorGUILayout.HelpBox(
-            "Tip: inspect the selected prefab's scale and pivot if pieces overlap or sit too high/low. " +
-            "The generated layout uses Unity units and places the store around the scene origin.",
+            "Uses all detected shelf variants, a wider aisle plan, refrigerated wall units, specialty displays, " +
+            "named department signs, and checkout lanes. Generate again to replace only the previous generated store.",
             MessageType.None);
     }
 
@@ -121,8 +125,31 @@ public class AisleBeBackStoreGenerator : EditorWindow
 
         if (floorPrefab == null)
             floorPrefab = FindByName(prefabs, "floor");
+        string[] furnitureGuids = AssetDatabase.FindAssets("t:Prefab", new[] { AssetRoot + "/Furniture" });
+        var furniture = furnitureGuids
+            .Select(g => AssetDatabase.LoadAssetAtPath<GameObject>(AssetDatabase.GUIDToAssetPath(g)))
+            .Where(p => p != null).ToList();
+
+        shelfOptions = furniture
+            .Where(p => p.name.StartsWith("Shelf_", System.StringComparison.OrdinalIgnoreCase))
+            .OrderBy(p => p.name).ToList();
+        refrigerationOptions = furniture
+            .Where(p => p.name.StartsWith("Fridge_", System.StringComparison.OrdinalIgnoreCase) ||
+                        p.name.StartsWith("Freezer_", System.StringComparison.OrdinalIgnoreCase))
+            .OrderBy(p => p.name).ToList();
+        displayOptions = furniture
+            .Where(p => p.name.StartsWith("Stall_", System.StringComparison.OrdinalIgnoreCase) ||
+                        p.name.StartsWith("HeritageStall_", System.StringComparison.OrdinalIgnoreCase) ||
+                        p.name.StartsWith("Table_", System.StringComparison.OrdinalIgnoreCase) ||
+                        p.name.StartsWith("HeritageBuffet_", System.StringComparison.OrdinalIgnoreCase) ||
+                        p.name.StartsWith("Counter_", System.StringComparison.OrdinalIgnoreCase))
+            .OrderBy(p => p.name).ToList();
+        aisleSignOptions = furniture
+            .Where(p => p.name.StartsWith("Sign_04h2fw_", System.StringComparison.OrdinalIgnoreCase))
+            .OrderBy(p => p.name).ToList();
+
         if (shelfPrefab == null)
-            shelfPrefab = FindByName(prefabs, "shelf", "rack", "gondola");
+            shelfPrefab = shelfOptions.FirstOrDefault() ?? FindByName(prefabs, "shelf", "rack", "gondola");
         if (checkoutPrefab == null)
             checkoutPrefab = FindByName(prefabs, "checkout", "cashier", "cash_register", "register");
         if (productPrefab == null)
@@ -202,10 +229,11 @@ public class AisleBeBackStoreGenerator : EditorWindow
         CreateFloor(architecture);
         CreateWalls(architecture);
 
+        // A real store has fewer, longer aisle runs and distinct departments—not a dense grid.
         float totalRowsWidth = (aisleRows - 1) * aisleSpacing;
         float startX = -totalRowsWidth / 2f;
-        float rowLength = Mathf.Min((shelfUnitsPerRow - 1) * shelfSpacing + 2.5f, storeLength - 10f);
-        float startZ = -rowLength / 2f + 3f;
+        float rowLength = Mathf.Min((shelfUnitsPerRow - 1) * shelfSpacing + 2.4f, storeLength - 17f);
+        float startZ = -rowLength / 2f + 2.5f;
 
         for (int row = 0; row < aisleRows; row++)
         {
@@ -213,13 +241,19 @@ public class AisleBeBackStoreGenerator : EditorWindow
             for (int unit = 0; unit < shelfUnitsPerRow; unit++)
             {
                 float z = startZ + unit * shelfSpacing;
-                // Alternate row orientation to create clear aisles and visual variety.
+                GameObject chosenShelf = shelfOptions.Count > 0
+                    ? shelfOptions[(row + unit) % shelfOptions.Count]
+                    : shelfPrefab;
                 float yaw = row % 2 == 0 ? 0f : 180f;
-                var shelf = InstantiatePrefab(shelfPrefab, new Vector3(x, 0f, z), Quaternion.Euler(0f, yaw, 0f), shelves, "Aisle " + (row + 1) + " Shelf " + (unit + 1));
+                var shelf = InstantiatePrefab(chosenShelf, new Vector3(x, 0f, z),
+                    Quaternion.Euler(0f, yaw, 0f), shelves,
+                    "Aisle " + (row + 1) + " Shelf " + (unit + 1));
                 if (shelf != null && addProducts)
                     PlaceProductsOnShelf(shelf.transform, products, row, unit);
             }
         }
+
+        CreateStoreDepartments(root.transform, shelves, signs);
 
         if (addCheckoutArea)
             CreateCheckout(checkout, signs, root.transform);
@@ -281,6 +315,49 @@ public class AisleBeBackStoreGenerator : EditorWindow
 
             if (signPrefab != null)
                 InstantiatePrefab(signPrefab, new Vector3(x, 2.2f, z + 0.5f), Quaternion.identity, signs, "Checkout Sign " + (i + 1));
+        }
+    }
+
+    private void CreateStoreDepartments(Transform root, Transform fixtures, Transform signs)
+    {
+        // Refrigerated wall: alternate actual fridge/freezer assets along the back wall.
+        if (refrigerationOptions.Count > 0)
+        {
+            int coldCount = Mathf.Min(6, Mathf.Max(4, refrigerationOptions.Count));
+            for (int i = 0; i < coldCount; i++)
+            {
+                float x = -storeWidth * 0.36f + i * (storeWidth * 0.72f / Mathf.Max(1, coldCount - 1));
+                GameObject prefab = refrigerationOptions[i % refrigerationOptions.Count];
+                InstantiatePrefab(prefab, new Vector3(x, 0f, storeLength * 0.5f - 2.0f),
+                    Quaternion.Euler(0f, 180f, 0f), fixtures, "Refrigerated Wall " + (i + 1));
+            }
+        }
+
+        // Produce and specialty displays near the front, leaving the entrance approach clear.
+        if (displayOptions.Count > 0)
+        {
+            int count = Mathf.Min(4, displayOptions.Count);
+            for (int i = 0; i < count; i++)
+            {
+                float x = i % 2 == 0 ? -storeWidth * 0.34f : storeWidth * 0.34f;
+                float z = -storeLength * 0.20f + (i / 2) * 5.0f;
+                GameObject prefab = displayOptions[i % displayOptions.Count];
+                InstantiatePrefab(prefab, new Vector3(x, 0f, z),
+                    Quaternion.Euler(0f, i % 2 == 0 ? 90f : -90f, 0f),
+                    fixtures, "Department Display " + (i + 1));
+            }
+        }
+
+        // Named department signs from the asset pack.
+        if (aisleSignOptions.Count > 0)
+        {
+            for (int row = 0; row < aisleRows; row++)
+            {
+                GameObject sign = aisleSignOptions[row % aisleSignOptions.Count];
+                float x = -((aisleRows - 1) * aisleSpacing) / 2f + row * aisleSpacing;
+                InstantiatePrefab(sign, new Vector3(x, wallHeight - 0.8f, -storeLength * 0.12f),
+                    Quaternion.identity, signs, "Department Sign " + (row + 1));
+            }
         }
     }
 
@@ -377,19 +454,23 @@ public class AisleBeBackStoreGenerator : EditorWindow
         if (renderers.Length == 0)
             return new Bounds(Vector3.zero, new Vector3(0.25f, 0.3f, 0.2f));
 
+        // Use each renderer's local bounds transformed into the target's local space.
+        // Renderer.bounds is a world-space AABB and can be misleading for prefab assets
+        // that have not been instantiated into the active scene.
         bool initialized = false;
         Bounds localBounds = new Bounds(Vector3.zero, Vector3.zero);
         foreach (Renderer renderer in renderers)
         {
-            Bounds worldBounds = renderer.bounds;
-            Vector3 min = worldBounds.min;
-            Vector3 max = worldBounds.max;
+            Bounds rendererBounds = renderer.localBounds;
+            Vector3 min = rendererBounds.min;
+            Vector3 max = rendererBounds.max;
             for (int corner = 0; corner < 8; corner++)
             {
-                Vector3 worldCorner = new Vector3(
+                Vector3 rendererLocalCorner = new Vector3(
                     (corner & 1) == 0 ? min.x : max.x,
                     (corner & 2) == 0 ? min.y : max.y,
                     (corner & 4) == 0 ? min.z : max.z);
+                Vector3 worldCorner = renderer.transform.TransformPoint(rendererLocalCorner);
                 Vector3 localCorner = target.transform.InverseTransformPoint(worldCorner);
                 if (!initialized)
                 {

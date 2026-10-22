@@ -3,6 +3,18 @@ using UnityEngine.UI;
 
 public class HelicopterController : MonoBehaviour
 {
+
+    [Tooltip("1 = original model size, 0.05 = RC size")]
+    public float ScaleFactor = 0.05f;
+
+    private float _startY;
+
+    private float InertiaScale
+    {
+        get { return ScaleFactor * ScaleFactor; }
+    }
+
+
     public AudioSource HelicopterSound;
     public ControlPanel ControlPanel;
     public Rigidbody HelicopterModel;
@@ -43,7 +55,8 @@ public class HelicopterController : MonoBehaviour
 	void Start ()
 	{
         ControlPanel.KeyPressed += OnKeyPressed;
-	}
+        _startY = HelicopterModel.transform.position.y;
+    }
 
 	void Update () {
 	}
@@ -59,13 +72,15 @@ public class HelicopterController : MonoBehaviour
     {
         var turn = TurnForce * Mathf.Lerp(hMove.x, hMove.x * (turnTiltForcePercent - Mathf.Abs(hMove.y)), Mathf.Max(0f, hMove.y));
         hTurn = Mathf.Lerp(hTurn, turn, Time.fixedDeltaTime * TurnForce);
-        HelicopterModel.AddRelativeTorque(0f, hTurn * HelicopterModel.mass, 0f);
-        HelicopterModel.AddRelativeForce(Vector3.forward * Mathf.Max(0f, hMove.y * ForwardForce * HelicopterModel.mass));
+        HelicopterModel.AddRelativeTorque(0f, hTurn * InertiaScale, 0f);
+        HelicopterModel.AddRelativeForce(Vector3.forward * Mathf.Max(0f, hMove.y * ForwardForce * ScaleFactor), ForceMode.Acceleration);
     }
 
     private void LiftProcess()
     {
-        var upForce = 1 - Mathf.Clamp(HelicopterModel.transform.position.y / EffectiveHeight, 0, 1);
+        float scaledHeight = EffectiveHeight * ScaleFactor;            // 100 -> 5
+        float height = HelicopterModel.transform.position.y - _startY;
+        var upForce = 1 - Mathf.Clamp(height / scaledHeight, 0, 1);
         upForce = Mathf.Lerp(0f, EngineForce, upForce) * HelicopterModel.mass;
         HelicopterModel.AddRelativeForce(Vector3.up * upForce);
     }
@@ -103,11 +118,11 @@ public class HelicopterController : MonoBehaviour
             {
                 case PressedKeyCode.SpeedUpPressed:
 
-                    EngineForce += 0.1f;
+                    EngineForce += 0.03f;
                     break;
                 case PressedKeyCode.SpeedDownPressed:
 
-                    EngineForce -= 0.12f;
+                    EngineForce -= 0.04f;
                     if (EngineForce < 0) EngineForce = 0;
                     break;
 
@@ -134,15 +149,15 @@ public class HelicopterController : MonoBehaviour
                     case PressedKeyCode.TurnRightPressed:
                     {
                         if (IsOnGround) break;
-                        var force = (turnForcePercent - Mathf.Abs(hMove.y))*HelicopterModel.mass;
+                        var force = (turnForcePercent - Mathf.Abs(hMove.y)) * InertiaScale;
                         HelicopterModel.AddRelativeTorque(0f, force, 0);
                     }
                     break;
                     case PressedKeyCode.TurnLeftPressed:
                     {
                         if (IsOnGround) break;
-                        
-                        var force = -(turnForcePercent - Mathf.Abs(hMove.y))*HelicopterModel.mass;
+
+                        var force = -(turnForcePercent - Mathf.Abs(hMove.y)) * InertiaScale;
                         HelicopterModel.AddRelativeTorque(0f, force, 0);
                     }
                     break;

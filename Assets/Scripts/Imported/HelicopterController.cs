@@ -94,6 +94,8 @@ public class HelicopterController : MonoBehaviour
 
     private void OnKeyPressed(PressedKeyCode[] obj)
     {
+        if (!enabled) return;
+
         float tempY = 0;
         float tempX = 0;
 

@@ -7,8 +7,8 @@ public class HeliController : Controller
     public KeyCode collectiveUp;
     public KeyCode collectiveDown;
     // Pitch
-    public KeyCode pitchUp;
-    public KeyCode pitchDown;
+    public KeyCode pitchForward;
+    public KeyCode pitchBack;
     // Roll
     public KeyCode rollLeft;
     public KeyCode rollRight;
@@ -40,14 +40,14 @@ public class HeliController : Controller
         }
 
         // Pitch
-        if (Input.GetKey(pitchUp))
+        if (Input.GetKey(pitchForward))
         {
-            pawn.PitchUp();
+            pawn.PitchForward();
         }
 
-        if (Input.GetKey(pitchDown))
+        if (Input.GetKey(pitchBack))
         {
-            pawn.PitchDown();
+            pawn.PitchBack();
         }
 
         // Roll
@@ -79,7 +79,7 @@ public class HeliController : Controller
         }
     }
 
-    public override void Start()
+    public void Start()
     {
         // HeliController is registering itself with the GameManager
         if (GameManager.instance != null)
@@ -88,7 +88,7 @@ public class HeliController : Controller
         }
     }
 
-    public override void Update()
+    public void FixedUpdate()
     {
         MakeDecisions();
     }
